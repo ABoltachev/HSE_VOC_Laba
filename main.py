@@ -1,12 +1,12 @@
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from dataset import VocAnimalsDataset
+from dataset.voc_dataset import VocClassificationDataset
 
 
 def main():
-    data_train = VocAnimalsDataset('dataset/data', 'train', transform=transforms.ToTensor())
-    data_test = VocAnimalsDataset('dataset/data', 'val', transform=transforms.ToTensor())
+    data_train = VocClassificationDataset('dataset/data', 'train', transform=transforms.ToTensor())
+    data_test = VocClassificationDataset('dataset/data', 'val', transform=transforms.ToTensor())
     train_loader = DataLoader(data_train, num_workers=4)
     test_loader = DataLoader(data_test, num_workers=4)
 
