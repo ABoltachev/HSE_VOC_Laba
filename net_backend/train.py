@@ -153,6 +153,7 @@ def main():
     train_args_dict = {a.dest: getattr(args, a.dest, None) for a in train_args_parser._group_actions}
     opt_args_dict = {a.dest: getattr(args, a.dest, None) for a in opt_args_parser._group_actions}
 
+    os.makedirs(args.log_path, exist_ok=True)
     init_logging(args.log_path, args.exp_name)
 
     seed = torch.initial_seed()
