@@ -1,72 +1,20 @@
 # TODO: add augmentation
-# TODO: add normalization and write a script to calculate it
 import argparse
-import datetime
 import logging
 import os
 
+import numpy as np
 import torch
 import torch.optim as optim
 import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 from torch.utils import data
 from torchvision.models import resnet18
-from sklearn.metrics import average_precision_score
 from tqdm import tqdm
 
-from dataset.voc_dataset import VocClassificationDataset, CLASSES
-
-__DEBUG_MODE = False
-__DATETIME = f'{datetime.datetime.now().strftime("%y-%m-%d_%I-%M-%S_%p")}'
-
-
-def save_model(name_model, epoch, done_steps,
-               optimizer, model, seed,
-               train_transforms, valid_transforms,
-               train_args_dict, opt_args_dict):
-    state = {
-        'epoch': epoch,
-        'done_steps': done_steps,
-        'optimizer': optimizer.state_dict(),
-        'model': model.state_dict(),
-        'train_transforms': train_transforms,
-        'valid_transforms': valid_transforms,
-        'train_args_dict': train_args_dict,
-        'opt_args_dict': opt_args_dict,
-        'seed': seed,
-    }
-    torch.save(state, name_model)
-
-
-def get_ap_score(y_true, y_scores):
-    scores = 0.0
-
-    for i in range(y_true.shape[0]):
-        scores += average_precision_score(y_true=y_true[i], y_score=y_scores[i])
-
-    return scores
-
-
-def init_logging(log_path, exp_name):
-    # set up logging to file - see previous section for more details
-    if exp_name:
-        log_filename = os.path.join(log_path, exp_name)
-    else:
-        log_filename = os.path.join(log_path, __DATETIME)
-    logging.basicConfig(level=logging.DEBUG if __DEBUG_MODE else logging.INFO,
-                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                        datefmt='%m-%d %H:%M',
-                        filename=f'{log_filename}.log',
-                        filemode='w')
-    # define a Handler which writes INFO messages or higher to the sys.stderr
-    console = logging.StreamHandler()
-    console.setLevel(logging.DEBUG if __DEBUG_MODE else logging.INFO)
-    # set a format which is simpler for console use
-    formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-    # tell the handler to use this format
-    console.setFormatter(formatter)
-    # add the handler to the root logger
-    logging.getLogger('').addHandler(console)
+from dataset.voc_dataset import CLASSES
+from dataset.voc_dataset import VocClassificationDataset
+from src.utils import init_logging, get_ap_score, save_model, calculate_mean_std, DATETIME
 
 
 def main():
@@ -101,6 +49,10 @@ def main():
                         help='When this flag is set, the GPU is used for training')
     # Train parameters
     train_args_parser = parser.add_argument_group('Train parameters')
+    train_args_parser.add_argument('--npz_filepath',
+                                   default=None,
+                                   type=str,
+                                   help='Path to npz file with mean and std for normalization')
     train_args_parser.add_argument('--image_size',
                                    nargs='+',
                                    default=[300, 300],
@@ -162,20 +114,34 @@ def main():
     if args.exp_name:
         tensorboard_path = os.path.join(args.tensorboard_path, args.exp_name)
     else:
-        tensorboard_path = os.path.join(args.tensorboard_path, __DATETIME)
+        tensorboard_path = os.path.join(args.tensorboard_path, DATETIME)
     tb_writer = SummaryWriter(log_dir=tensorboard_path)
     logging.info('TensorBoardX summary writer created')
 
     device = torch.device('cuda' if args.use_gpu else 'cpu')
     logging.info(f'Train device: {device}')
 
-    mean = [0., 0., 0.]
-    std = [1., 1., 1.]
+    if args.npz_filepath:
+        npzfile = np.load(args.npz_filepath)
+        mean = npzfile['mean']
+        std = npzfile['std']
+    else:
+        transforms_for_msc = transforms.Compose([transforms.Resize(tuple(args.image_size)),
+                                                transforms.ToTensor()])
+        data_for_msc = VocClassificationDataset(args.dataset_path, 'train', transform=transforms_for_msc)
+        loader_for_msc = data.DataLoader(data_for_msc, num_workers=4)
+
+        mean, std = calculate_mean_std(loader_for_msc, tuple(args.image_size), device)
+
+    logging.info(f'mean: {mean}')
+    logging.info(f'std: {std}')
 
     train_transforms = transforms.Compose([transforms.Resize(tuple(args.image_size)),
-                                           transforms.ToTensor()])
+                                           transforms.ToTensor(),
+                                           transforms.Normalize(mean, std)])
     valid_transforms = transforms.Compose([transforms.Resize(tuple(args.image_size)),
-                                           transforms.ToTensor()])
+                                           transforms.ToTensor(),
+                                           transforms.Normalize(mean, std)])
 
     train_data = VocClassificationDataset(args.dataset_path, 'train', transform=train_transforms)
     train_data_loader = data.DataLoader(
@@ -231,7 +197,7 @@ def main():
     if args.exp_name:
         checkpoint_path = os.path.join(args.checkpoint_path, args.exp_name)
     else:
-        checkpoint_path = os.path.join(args.checkpoint_path, __DATETIME)
+        checkpoint_path = os.path.join(args.checkpoint_path, DATETIME)
     os.makedirs(checkpoint_path, exist_ok=True)
 
     criterion = torch.nn.BCEWithLogitsLoss(reduction='sum')
