@@ -12,6 +12,7 @@ from tensorboardX import SummaryWriter
 from torch.utils import data
 from torchvision.models import resnet18
 from sklearn.metrics import average_precision_score
+from tqdm import tqdm
 
 from dataset.voc_dataset import VocClassificationDataset, CLASSES
 
@@ -38,7 +39,7 @@ def get_ap_score(y_true, y_scores):
     for i in range(y_true.shape[0]):
         scores += average_precision_score(y_true=y_true[i], y_score=y_scores[i])
 
-    return scores / 100.
+    return scores
 
 
 def init_logging(log_path):
@@ -209,18 +210,19 @@ def main():
     done_steps = 1
     best_loss = float('+inf')
     best_ap = float('0')
-    cur_train_loss = .0
-    cur_train_ap = .0
 
     os.makedirs(os.path.join(args.checkpoint_path, __DATETIME))
 
-    criterion = torch.nn.BCEWithLogitsLoss()
+    criterion = torch.nn.BCEWithLogitsLoss(reduction='sum')
     m = torch.nn.Sigmoid()
 
     for epoch in range(args.num_epochs):
+        cur_train_loss = .0
+        cur_train_ap = .0
         model.train()
 
-        for imgs, targets in train_data_loader:
+        tbar = tqdm(train_data_loader, dynamic_ncols=True)
+        for i, (imgs, targets) in enumerate(tbar):
             if done_steps % args.accum_grad == 0:
                 optimizer.zero_grad()
                 logging.debug('Zero gradient')
@@ -239,28 +241,30 @@ def main():
             cur_train_loss += loss.item()
             cur_train_ap += ap
 
-            if done_steps % args.print_step == 0:
-                cur_loss = cur_train_loss / float(done_steps)
-                cur_ap = cur_train_ap / float(done_steps)
-
-                logging.info(f'Epoch: {epoch + 1}\tStep: {done_steps}'
-                             f'\tLoss: {cur_loss:.4f}\tAP: {cur_ap:.4f}')
+            tbar.set_description_str(f'Train: {epoch + 1 } '
+                                     f'Loss: {cur_train_loss / float((i + 1) * args.batch_size):.4f} '
+                                     f'AP: {cur_train_ap / float((i + 1) * args.batch_size):.4f}')
 
             if done_steps % args.tensorboard_update_step == 0:
-                cur_loss = cur_train_loss / float(done_steps)
-                cur_ap = cur_train_ap / float(done_steps)
 
-                tb_writer.add_scalar('train/loss', cur_loss, done_steps)
-                tb_writer.add_scalar('train/accuracy', cur_ap, done_steps)
+                tb_writer.add_scalar('train/loss', cur_train_loss / float((i + 1) * args.batch_size), done_steps)
+                tb_writer.add_scalar('train/accuracy', cur_train_ap / float((i + 1) * args.batch_size), done_steps)
 
             done_steps += 1
+
+        cur_train_loss = cur_train_loss / len(train_data)
+        cur_train_ap = cur_train_ap / len(train_data)
+
+        logging.info(f'Epoch: {epoch + 1}\tStep: {done_steps}\t'
+                     f'Loss: {cur_train_loss:.4f}\tAP: {cur_train_ap:.4f}')
 
         test_loss = 0
         test_ap = 0
         model.eval()
 
         with torch.no_grad():
-            for dev_imgs, dev_targets in valid_data_loader:
+            dev_tbar = tqdm(valid_data_loader, dynamic_ncols=True)
+            for i, (dev_imgs, dev_targets) in enumerate(dev_tbar):
                 dev_imgs, dev_targets = dev_imgs.to(device), dev_targets.to(device)
 
                 dev_out = model(dev_imgs)
@@ -269,8 +273,12 @@ def main():
 
                 test_ap += get_ap_score(dev_targets.cpu().detach().numpy(), m(dev_out).cpu().detach().numpy())
 
-        test_ap = test_ap / len(valid_data_loader)
-        test_loss = test_loss / len(valid_data_loader)
+                dev_tbar.set_description(f'Valid: {epoch + 1} '
+                                         f'Loss: {test_loss / float((i + 1) * args.batch_size):.4f} '
+                                         f'AP: {test_ap / float((i + 1) * args.batch_size):.4f}')
+
+        test_ap = test_ap / len(valid_data)
+        test_loss = test_loss / len(valid_data)
 
         logging.info(f'Epoch: {epoch + 1}\tStep: {done_steps}\t'
                      f'Valid/Loss: {test_loss:.4f}\tValid/AP: {test_ap:.4f}')
