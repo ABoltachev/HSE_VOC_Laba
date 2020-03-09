@@ -20,7 +20,10 @@ __DEBUG_MODE = False
 __DATETIME = f'{datetime.datetime.now().strftime("%y-%m-%d_%I-%M-%S_%p")}'
 
 
-def save_model(name_model, epoch, done_steps, optimizer, model, seed, train_transforms, valid_transforms):
+def save_model(name_model, epoch, done_steps,
+               optimizer, model, seed,
+               train_transforms, valid_transforms,
+               train_args_dict, opt_args_dict):
     state = {
         'epoch': epoch,
         'done_steps': done_steps,
@@ -28,6 +31,8 @@ def save_model(name_model, epoch, done_steps, optimizer, model, seed, train_tran
         'model': model.state_dict(),
         'train_transforms': train_transforms,
         'valid_transforms': valid_transforms,
+        'train_args_dict': train_args_dict,
+        'opt_args_dict': opt_args_dict,
         'seed': seed,
     }
     torch.save(state, name_model)
@@ -42,15 +47,17 @@ def get_ap_score(y_true, y_scores):
     return scores
 
 
-def init_logging(log_path):
+def init_logging(log_path, exp_name):
     # set up logging to file - see previous section for more details
-    if log_path:
+    if exp_name:
+        log_filename = os.path.join(log_path, exp_name)
+    else:
         log_filename = os.path.join(log_path, __DATETIME)
-        logging.basicConfig(level=logging.DEBUG if __DEBUG_MODE else logging.INFO,
-                            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                            datefmt='%m-%d %H:%M',
-                            filename=f'{log_filename}.log',
-                            filemode='w')
+    logging.basicConfig(level=logging.DEBUG if __DEBUG_MODE else logging.INFO,
+                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                        datefmt='%m-%d %H:%M',
+                        filename=f'{log_filename}.log',
+                        filemode='w')
     # define a Handler which writes INFO messages or higher to the sys.stderr
     console = logging.StreamHandler()
     console.setLevel(logging.DEBUG if __DEBUG_MODE else logging.INFO)
@@ -84,10 +91,10 @@ def main():
                         default=10,
                         type=int,
                         help='Update TensorBoard logs every n step')
-    parser.add_argument('--print_step',
-                        default=10,
-                        type=int,
-                        help='Print information every n step')
+    parser.add_argument('--exp_name',
+                        default=None,
+                        type=str,
+                        help='The name of the expration. If not set, then the current date is used by expration name')
     parser.add_argument('--use_gpu',
                         default=False,
                         type=bool,
@@ -143,12 +150,19 @@ def main():
                                  help='Momentum factor')
     args = parser.parse_args()
 
-    init_logging(args.log_path)
+    train_args_dict = {a.dest: getattr(args, a.dest, None) for a in train_args_parser._group_actions}
+    opt_args_dict = {a.dest: getattr(args, a.dest, None) for a in opt_args_parser._group_actions}
+
+    init_logging(args.log_path, args.exp_name)
 
     seed = torch.initial_seed()
     logging.info(f'Used seed : {seed}')
 
-    tb_writer = SummaryWriter(log_dir=os.path.join(args.tensorboard_path, __DATETIME))
+    if args.exp_name:
+        tensorboard_path = os.path.join(args.tensorboard_path, args.exp_name)
+    else:
+        tensorboard_path = os.path.join(args.tensorboard_path, __DATETIME)
+    tb_writer = SummaryWriter(log_dir=tensorboard_path)
     logging.info('TensorBoardX summary writer created')
 
     device = torch.device('cuda' if args.use_gpu else 'cpu')
@@ -186,10 +200,12 @@ def main():
     logging.info('model created')
 
     if args.optim == 'adam':
+        opt_args_dict['betas'] = tuple(args.betas)
         optimizer = optim.Adam(model.parameters(), lr=args.lr,
                                betas=tuple(args.betas), weight_decay=args.weight_decay)
         logging.info('Adam optimizer created')
     elif args.optim == 'sgd':
+        opt_args_dict['momentum'] = args.momentum
         optimizer = optim.SGD(model.parameters(), lr=args.lr,
                               momentum=args.momentum, weight_decay=args.weight_decay)
         logging.info('SGD optimizer created')
@@ -211,7 +227,11 @@ def main():
     best_loss = float('+inf')
     best_ap = float('0')
 
-    os.makedirs(os.path.join(args.checkpoint_path, __DATETIME))
+    if args.exp_name:
+        checkpoint_path = os.path.join(args.checkpoint_path, args.exp_name)
+    else:
+        checkpoint_path = os.path.join(args.checkpoint_path, __DATETIME)
+    os.makedirs(checkpoint_path, exist_ok=True)
 
     criterion = torch.nn.BCEWithLogitsLoss(reduction='sum')
     m = torch.nn.Sigmoid()
@@ -248,7 +268,7 @@ def main():
             if done_steps % args.tensorboard_update_step == 0:
 
                 tb_writer.add_scalar('train/loss', cur_train_loss / float((i + 1) * args.batch_size), done_steps)
-                tb_writer.add_scalar('train/accuracy', cur_train_ap / float((i + 1) * args.batch_size), done_steps)
+                tb_writer.add_scalar('train/ap', cur_train_ap / float((i + 1) * args.batch_size), done_steps)
 
             done_steps += 1
 
@@ -284,22 +304,26 @@ def main():
                      f'Valid/Loss: {test_loss:.4f}\tValid/AP: {test_ap:.4f}')
 
         tb_writer.add_scalar('valid/loss', test_loss, done_steps)
-        tb_writer.add_scalar('valid/acc', test_ap, done_steps)
+        tb_writer.add_scalar('valid/ap', test_ap, done_steps)
 
         if best_loss - test_loss > 1e-6:
             best_loss = test_loss
-            best_loss_checkpoint_path = os.path.join(args.checkpoint_path, f'model.best.loss')
+            best_loss_checkpoint_path = os.path.join(checkpoint_path, f'model.best.loss')
             save_model(best_loss_checkpoint_path, epoch + 1, done_steps, optimizer, model, seed,
-                       train_transforms, valid_transforms)
+                       train_transforms, valid_transforms,
+                       train_args_dict, opt_args_dict)
 
         if best_ap - test_ap < -1e-6:
             best_ap = test_ap
-            best_ap_checkpoint_path = os.path.join(args.checkpoint_path, f'model.best.ap')
+            best_ap_checkpoint_path = os.path.join(checkpoint_path, f'model.best.ap')
             save_model(best_ap_checkpoint_path, epoch + 1, done_steps, optimizer, model, seed,
-                       train_transforms, valid_transforms)
+                       train_transforms, valid_transforms,
+                       train_args_dict, opt_args_dict)
 
-        checkpoint_path = os.path.join(args.checkpoint_path, __DATETIME, f'model.{epoch + 1}')
-        save_model(checkpoint_path, epoch + 1, done_steps, optimizer, model, seed, train_transforms, valid_transforms)
+        epoch_checkpoint_path = os.path.join(checkpoint_path, f'model.{epoch + 1}')
+        save_model(epoch_checkpoint_path, epoch + 1, done_steps, optimizer, model, seed,
+                   train_transforms, valid_transforms,
+                   train_args_dict, opt_args_dict)
 
 
 if __name__ == '__main__':
