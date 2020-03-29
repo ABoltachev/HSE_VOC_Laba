@@ -111,6 +111,10 @@ def main():
                                 default=[300, 300],
                                 type=int,
                                 help='Desired output size (default: (300, 300))')
+    msc_args_group.add_argument('--is_gray',
+                                default=False,
+                                type=bool,
+                                help='If set to true, then convert image to grayscale')
     msc_args_group.add_argument('--out_path',
                                 required=True,
                                 type=str,
@@ -118,8 +122,13 @@ def main():
     args = parser.parse_args()
 
     if args.algorithm == __CALCULATE_MEAN_STD:
-        transforms_for_msc = transforms.Compose([transforms.Resize(tuple(args.image_size)),
-                                                 transforms.ToTensor()])
+        if args.is_gray:
+            transforms_for_msc = transforms.Compose([transforms.Resize(tuple(args.image_size)),
+                                                     transforms.Grayscale(num_output_channels=3),
+                                                     transforms.ToTensor()])
+        else:
+            transforms_for_msc = transforms.Compose([transforms.Resize(tuple(args.image_size)),
+                                                     transforms.ToTensor()])
         data_for_msc = VocClassificationDataset(args.dataset_path, 'train', transform=transforms_for_msc)
         loader_for_msc = data.DataLoader(data_for_msc, num_workers=4)
 

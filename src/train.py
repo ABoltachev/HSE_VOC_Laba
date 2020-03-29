@@ -137,9 +137,12 @@ def main():
     logging.info(f'std: {std}')
 
     train_transforms = transforms.Compose([transforms.Resize(tuple(args.image_size)),
+                                           transforms.Grayscale(num_output_channels=3),
+                                           transforms.RandomHorizontalFlip(p=0.5),
                                            transforms.ToTensor(),
                                            transforms.Normalize(mean, std)])
     valid_transforms = transforms.Compose([transforms.Resize(tuple(args.image_size)),
+                                           transforms.Grayscale(num_output_channels=3),
                                            transforms.ToTensor(),
                                            transforms.Normalize(mean, std)])
 
