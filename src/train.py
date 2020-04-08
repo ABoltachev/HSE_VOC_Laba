@@ -7,13 +7,15 @@ import numpy as np
 import torch
 import torch.optim as optim
 import torchvision.transforms as transforms
-from tensorboardX import SummaryWriter
 from torch.utils import data
+from torch.utils.tensorboard.writer import SummaryWriter
 from torchvision.models import resnet18
 from tqdm import tqdm
 
 from dataset.voc_dataset import CLASSES
 from dataset.voc_dataset import VocClassificationDataset
+from src.criterions import MultiLabelLoss
+from src.layers import MultiLabelClassifier
 from src.utils import init_logging, get_ap_score, save_model, calculate_mean_std, DATETIME
 
 
@@ -49,6 +51,10 @@ def main():
                         help='When this flag is set, the GPU is used for training')
     # Train parameters
     train_args_parser = parser.add_argument_group('Train parameters')
+    train_args_parser.add_argument('--use_multi_label_classifier',
+                                   default=False,
+                                   type=bool,
+                                   help='Use multi label classifier')
     train_args_parser.add_argument('--npz_filepath',
                                    default=None,
                                    type=str,
@@ -166,6 +172,8 @@ def main():
     logging.info('Valid data loader created')
 
     model = resnet18(num_classes=len(CLASSES))
+    if args.use_multi_label_classifier:
+        model.fc = MultiLabelClassifier(512, len(CLASSES))
     model = model.to(device)
     logging.info('model created')
 
@@ -203,7 +211,10 @@ def main():
         checkpoint_path = os.path.join(args.checkpoint_path, DATETIME)
     os.makedirs(checkpoint_path, exist_ok=True)
 
-    criterion = torch.nn.BCEWithLogitsLoss(reduction='sum')
+    if args.use_multi_label_classifier:
+        criterion = MultiLabelLoss(len(CLASSES), reduction='sum')
+    else:
+        criterion = torch.nn.BCEWithLogitsLoss(reduction='sum')
     m = torch.nn.Sigmoid()
 
     for epoch in range(args.num_epochs):
@@ -227,7 +238,11 @@ def main():
             loss.backward()
             optimizer.step()
 
-            ap = get_ap_score(targets.cpu().detach().numpy(), m(out).cpu().detach().numpy())
+            if args.use_multi_label_classifier:
+                targets_scores = m(out).cpu().detach().numpy()[:, :, 1]
+            else:
+                targets_scores = m(out).cpu().detach().numpy()
+            ap = get_ap_score(targets.cpu().detach().numpy(), targets_scores)
             cur_train_loss += loss.item()
             cur_train_ap += ap
 
@@ -261,7 +276,11 @@ def main():
 
                 test_loss += criterion(dev_out, dev_targets).item()
 
-                test_ap += get_ap_score(dev_targets.cpu().detach().numpy(), m(dev_out).cpu().detach().numpy())
+                if args.use_multi_label_classifier:
+                    targets_scores = m(dev_out).cpu().detach().numpy()[:, :, 1]
+                else:
+                    targets_scores = m(dev_out).cpu().detach().numpy()
+                test_ap += get_ap_score(dev_targets.cpu().detach().numpy(), targets_scores)
 
                 dev_tbar.set_description(f'Valid: {epoch + 1} '
                                          f'Loss: {test_loss / float((i + 1) * args.batch_size):.4f} '
