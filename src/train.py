@@ -298,19 +298,19 @@ def main():
         if best_loss - test_loss > 1e-6:
             best_loss = test_loss
             best_loss_checkpoint_path = os.path.join(checkpoint_path, f'model.best.loss')
-            save_model(best_loss_checkpoint_path, epoch + 1, done_steps, optimizer, model, seed,
+            save_model(best_loss_checkpoint_path, epoch + 1, optimizer, model,
                        train_transforms, valid_transforms,
                        train_args_dict, opt_args_dict)
 
         if best_ap - test_ap < -1e-6:
             best_ap = test_ap
             best_ap_checkpoint_path = os.path.join(checkpoint_path, f'model.best.ap')
-            save_model(best_ap_checkpoint_path, epoch + 1, done_steps, optimizer, model, seed,
+            save_model(best_ap_checkpoint_path, epoch + 1, optimizer, model,
                        train_transforms, valid_transforms,
                        train_args_dict, opt_args_dict)
 
         epoch_checkpoint_path = os.path.join(checkpoint_path, f'model.{epoch + 1}')
-        save_model(epoch_checkpoint_path, epoch + 1, done_steps, optimizer, model, seed,
+        save_model(epoch_checkpoint_path, epoch + 1, optimizer, model,
                    train_transforms, valid_transforms,
                    train_args_dict, opt_args_dict)
 

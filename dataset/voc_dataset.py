@@ -10,6 +10,9 @@ CLASSES = ['person', 'aeroplane', 'bicycle', 'boat', 'bus', 'car', 'motorbike', 
 
 
 class VocClassificationDataset(Dataset):
+    """
+    VOC dataset
+    """
     def __init__(self, root, set, transform=None, target_transform=None):
         self.root = os.path.join(root, 'VOCdevkit', 'VOC2012')
         self.images_path = os.path.join(self.root, 'JPEGImages')
