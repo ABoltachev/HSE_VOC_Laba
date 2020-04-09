@@ -5,10 +5,10 @@ Neural Network model for multi-classification. Deep learning engine - PyTorch<br
 
 ## Clone repository without models
 
-GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/ABoltachev/HSE_VOC_Laba.git
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/ABoltachev/HSE_VOC_Laba.git<br>
 To clone model:
-sudo apt-get install git-lfs
-git lfs clone
+ * sudo apt-get install git-lfs
+ * git lfs clone
 
 ## Train
 
